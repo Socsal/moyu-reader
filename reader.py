@@ -456,7 +456,7 @@ if __name__ == '__main__':
         y=cfg['y'],
         resizable=False,
         frameless=True,
-        easy_drag=False,
+        easy_drag=True,
         on_top=True,
         transparent=True
     )
