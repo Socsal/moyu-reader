@@ -83,13 +83,23 @@ python reader.py
 pyinstaller --onefile --windowed --name "MoyuReader" reader.py
 ```
 
-**已知问题：** 打包后的 exe 在运行时调整窗口大小会导致透明度失效（这是 pywebview + Windows WebView2 的已知限制）。因此我们采用了独立设置面板的方案。
+Windows 阅读窗口使用 DWM 扩展透明客户区，在修改尺寸、最小化后恢复时保持背景透明。设置页样式限定在 `#moyu-settings` 容器中，避免嵌入阅读页时覆盖阅读背景。
+
+### 验证透明效果（Windows）
+
+安装上述依赖后，在已解锁的 Windows 桌面运行：
+
+```bash
+python tests/windows_transparency_check.py
+```
+
+检查会短暂显示测试窗口，验证尺寸变化、最小化恢复、移动、隐藏显示，以及设置面板显示/关闭后的实际屏幕背景；不会读取或修改个人阅读配置、书籍和进度。
 
 ## 🤝 贡献
 
 欢迎 PR 和 Issue！特别期待：
 
-- [ ] 更好的透明度方案（解决 resize 问题）
+- [x] 修复 Windows 下 resize、最小化恢复后的透明背景
 - [ ] 更多文件格式支持（PDF, MOBI 等）
 - [ ] 更丰富的阅读设置（字体、颜色等）
 - [ ] 更隐蔽的"老板键"功能

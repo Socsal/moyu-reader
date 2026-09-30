@@ -58,20 +58,20 @@ def get_html():
 <head>
     <meta charset="UTF-8">
     <style>
-        * {
+        #moyu-settings, #moyu-settings * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
 
-        body {
+        #moyu-settings {
             font-family: "Microsoft YaHei", sans-serif;
             padding: 20px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
         }
 
-        .container {
+        #moyu-settings .container {
             max-width: 500px;
             margin: 0 auto;
             background: white;
@@ -80,24 +80,24 @@ def get_html():
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
         }
 
-        h1 {
+        #moyu-settings h1 {
             text-align: center;
             color: #333;
             margin-bottom: 30px;
             font-size: 24px;
         }
 
-        .setting-group {
+        #moyu-settings .setting-group {
             margin-bottom: 25px;
             padding-bottom: 20px;
             border-bottom: 1px solid #eee;
         }
 
-        .setting-group:last-child {
+        #moyu-settings .setting-group:last-child {
             border-bottom: none;
         }
 
-        label {
+        #moyu-settings label {
             display: block;
             font-size: 14px;
             color: #666;
@@ -105,13 +105,13 @@ def get_html():
             font-weight: bold;
         }
 
-        .input-group {
+        #moyu-settings .input-group {
             display: flex;
             align-items: center;
             gap: 10px;
         }
 
-        input[type="number"] {
+        #moyu-settings input[type="number"] {
             flex: 1;
             padding: 10px;
             border: 2px solid #ddd;
@@ -120,23 +120,23 @@ def get_html():
             transition: border-color 0.3s;
         }
 
-        input[type="number"]:focus {
+        #moyu-settings input[type="number"]:focus {
             outline: none;
             border-color: #667eea;
         }
 
-        .unit {
+        #moyu-settings .unit {
             color: #999;
             font-size: 14px;
         }
 
-        .current-value {
+        #moyu-settings .current-value {
             color: #667eea;
             font-weight: bold;
             font-size: 18px;
         }
 
-        button {
+        #moyu-settings button {
             width: 100%;
             padding: 12px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -149,16 +149,16 @@ def get_html():
             margin-top: 10px;
         }
 
-        button:hover {
+        #moyu-settings button:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
 
-        button:active {
+        #moyu-settings button:active {
             transform: translateY(0);
         }
 
-        .message {
+        #moyu-settings .message {
             margin-top: 15px;
             padding: 12px;
             border-radius: 6px;
@@ -167,26 +167,26 @@ def get_html():
             display: none;
         }
 
-        .message.success {
+        #moyu-settings .message.success {
             background: #d4edda;
             color: #155724;
             border: 1px solid #c3e6cb;
         }
 
-        .message.error {
+        #moyu-settings .message.error {
             background: #f8d7da;
             color: #721c24;
             border: 1px solid #f5c6cb;
         }
 
-        .preset-buttons {
+        #moyu-settings .preset-buttons {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 8px;
             margin-top: 10px;
         }
 
-        .preset-btn {
+        #moyu-settings .preset-btn {
             padding: 8px;
             background: #f0f0f0;
             border: 1px solid #ddd;
@@ -196,12 +196,12 @@ def get_html():
             transition: all 0.2s;
         }
 
-        .preset-btn:hover {
+        #moyu-settings .preset-btn:hover {
             background: #e0e0e0;
             border-color: #999;
         }
 
-        .info-text {
+        #moyu-settings .info-text {
             font-size: 12px;
             color: #999;
             margin-top: 5px;
@@ -209,7 +209,8 @@ def get_html():
         }
     </style>
 </head>
-<body>
+<body style="margin: 0;">
+  <div id="moyu-settings">
     <div class="container">
         <h1>📐 摸鱼阅读器 - 窗口设置</h1>
 
@@ -255,6 +256,7 @@ def get_html():
             ⚠️ 修改设置后，需要重新启动阅读器才能生效
         </div>
     </div>
+  </div>
 
     <script>
         // 页面加载时获取当前配置

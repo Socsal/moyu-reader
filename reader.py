@@ -115,6 +115,32 @@ class BookReader:
         return {'success': False, 'error': '未选择文件'}
 
 
+def enable_windows_transparency(window):
+    """Keep the WinForms host transparent when WebView2 resizes or restores."""
+    if sys.platform != 'win32' or webview.renderer != 'edgechromium':
+        return
+
+    import ctypes
+    from ctypes import wintypes
+    from System.Drawing import Color
+
+    class Margins(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_int) for name in ('left', 'right', 'top', 'bottom')]
+
+    extend_frame = ctypes.WinDLL('dwmapi').DwmExtendFrameIntoClientArea
+    extend_frame.argtypes = [wintypes.HWND, ctypes.POINTER(Margins)]
+    extend_frame.restype = ctypes.c_long
+
+    # Negative margins cover the entire client area, including future resizes.
+    # A black host supplies zero-alpha pixels to DWM; WebView2 still draws text
+    # and opaque controls normally. This is not a color-key transparency mask.
+    margins = Margins(-1, -1, -1, -1)
+    result = extend_frame(window.native.Handle.ToInt64(), ctypes.byref(margins))
+    if result < 0:
+        raise OSError(f'DwmExtendFrameIntoClientArea failed: 0x{result & 0xffffffff:08X}')
+    window.native.BackColor = Color.Black
+
+
 def get_html():
     """返回HTML内容"""
     return """
@@ -440,10 +466,7 @@ def get_html():
     """
 
 
-if __name__ == '__main__':
-    api = BookReader()
-    api.close = lambda: window.destroy()
-
+def create_reader_window(api):
     cfg = api.config['window']
 
     window = webview.create_window(
@@ -460,5 +483,13 @@ if __name__ == '__main__':
         on_top=True,
         transparent=True
     )
+    # before_show runs on the GUI thread after the native handle is available.
+    window.events.before_show += enable_windows_transparency
+    api.close = lambda: window.destroy()
+    return window
 
+
+if __name__ == '__main__':
+    api = BookReader()
+    window = create_reader_window(api)
     webview.start()
