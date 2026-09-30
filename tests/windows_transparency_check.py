@@ -6,32 +6,43 @@ No books or user configuration are loaded. Only project dependencies are used.
 """
 
 import json
-import re
 import sys
+import tempfile
 import time
 import traceback
 from pathlib import Path
-from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import webview
 import reader
-import settings
 
 
 def main():
     if sys.platform != 'win32':
         raise SystemExit('This check requires Windows and an unlocked desktop.')
 
-    api = SimpleNamespace(config={
-        'window': {'width': 400, 'height': 60, 'x': 100, 'y': 100},
-        'speed': 50,
-    })
+    data_dir = tempfile.TemporaryDirectory(prefix='moyu-regression-')
+    api = reader.BookReader(data_dir.name)
     window = reader.create_reader_window(api)
     backdrop = None
     failures = []
     background = (17, 201, 127)
+
+    def wait_js(condition):
+        deadline = time.monotonic() + 5
+        while not window.evaluate_js(condition):
+            if time.monotonic() >= deadline:
+                raise AssertionError(f'Timed out waiting for {condition}')
+            time.sleep(0.1)
+
+    def open_settings():
+        window.run_js("document.getElementById('settings-btn').click()")
+        wait_js("settingsOpen && !settingsBusy && !document.getElementById('moyu-settings').hidden")
+
+    def save_settings(width, height, speed):
+        window.run_js(f"setSetting('width', {width}); setSetting('height', {height}); setSetting('speed', {speed}); document.getElementById('settings-save').click()")
+        wait_js("!settingsOpen && !settingsBusy")
 
     def on_ui(callback):
         from System import Action
@@ -101,6 +112,7 @@ def main():
                 raise RuntimeError('Reader did not load within 20 seconds.')
             if webview.renderer != 'edgechromium':
                 raise RuntimeError('Install Microsoft Edge WebView2 Runtime first.')
+            wait_js("typeof settingsOpen !== 'undefined' && scrollSpeed === 50")
 
             def create_backdrop():
                 nonlocal backdrop
@@ -145,18 +157,7 @@ def main():
             on_ui(recolor)
             expect_transparent('background changes behind reader')
 
-            settings_html = settings.get_html()
-            css = re.search(r'<style>(.*?)</style>', settings_html, re.S).group(1)
-            panel = re.search(r'<body[^>]*>(.*?)<script>', settings_html, re.S).group(1)
-            window.evaluate_js('''(() => {
-                const style = document.createElement('style');
-                style.textContent = %s;
-                document.head.appendChild(style);
-                document.body.insertAdjacentHTML('beforeend', %s);
-                const panel = document.getElementById('moyu-settings');
-                panel.style.cssText = 'position:fixed;inset:0;z-index:2000;overflow:auto;display:none';
-            })()''' % (json.dumps(css), json.dumps(panel)))
-            expect_transparent('settings CSS loaded, panel hidden')
+            expect_transparent('built-in settings hidden')
             body_style = window.evaluate_js('''({
                 color: getComputedStyle(document.body).backgroundColor,
                 image: getComputedStyle(document.body).backgroundImage
@@ -164,19 +165,64 @@ def main():
             if body_style != {'color': 'rgba(0, 0, 0, 0)', 'image': 'none'}:
                 raise AssertionError(f'Settings changed the reader background: {body_style}')
 
-            window.resize(600, 600)
-            window.evaluate_js("document.getElementById('moyu-settings').style.display = 'block'")
+            window.run_js("content = 'A test book. '.repeat(100); document.getElementById('text-content').textContent = content; startScroll()")
+            wait_js('currentPosition > 0')
+            original_size = (window.width, window.height)
+            open_settings()
+            if len(webview.windows) != 1:
+                raise AssertionError('Settings opened a second WebView window.')
+            if window.evaluate_js('''(() => {
+                let escaped = false;
+                const listener = () => { escaped = true; };
+                window.addEventListener('mousedown', listener);
+                document.getElementById('settings-width').dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+                window.removeEventListener('mousedown', listener);
+                return escaped;
+            })()'''):
+                raise AssertionError('Editing settings triggered the window drag handler.')
+            print('PASS settings inputs do not drag the window', flush=True)
+            position = window.evaluate_js('currentPosition')
             time.sleep(0.5)
+            if not window.evaluate_js('isPaused') or window.evaluate_js('currentPosition') != position:
+                raise AssertionError('Reading continued while settings were open.')
             if pixels() == [background] * 3:
                 raise AssertionError('The visible settings panel should paint its own background.')
-            print('PASS settings panel paints its own background', flush=True)
-            window.evaluate_js("document.getElementById('moyu-settings').style.display = 'none'")
-            window.resize(400, 60)
-            expect_transparent('close settings and restore reader size')
+            print('PASS settings open in the same window and pause reading', flush=True)
+            window.run_js("setSetting('width', 777); document.getElementById('settings-cancel').click()")
+            wait_js('!settingsOpen && !settingsBusy && !isPaused')
+            if (window.width, window.height) != original_size or api.config_file.exists():
+                raise AssertionError('Cancel changed the reader size or saved configuration.')
+            window.run_js("content = ''; document.getElementById('text-content').textContent = ''")
+            expect_transparent('cancel settings and resume transparent reading')
+
+            open_settings()
+            save_settings(600, 120, 95)
+            expect_transparent('save settings and return to transparent reading')
+            saved = json.loads(api.config_file.read_text(encoding='utf-8'))
+            if (window.width, window.height) != (600, 120) or window.evaluate_js('scrollSpeed') != 95:
+                raise AssertionError('Saved settings did not take effect immediately.')
+            if saved['window']['width'] != 600 or saved['window']['height'] != 120 or saved['speed'] != 95:
+                raise AssertionError(f'Unexpected saved configuration: {saved}')
+            if reader.BookReader(data_dir.name).config != saved:
+                raise AssertionError('Saved settings did not survive a new reader instance.')
+            print('PASS dimensions and speed apply immediately and persist', flush=True)
+
+            window.run_js("document.dispatchEvent(new KeyboardEvent('keydown', {key:',', ctrlKey:true}))")
+            wait_js('settingsOpen && !settingsBusy')
+            if window.evaluate_js("document.getElementById('settings-width').value") != '600':
+                raise AssertionError('Reopened settings did not show the saved width.')
+            window.run_js("setSetting('width', 4999); document.getElementById('settings-save').click()")
+            time.sleep(0.2)
+            if not window.evaluate_js('settingsOpen') or api.apply_settings(4999, 120, 95)['success']:
+                raise AssertionError('Out-of-range dimensions were accepted.')
+            window.run_js("document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape'}))")
+            wait_js('!settingsOpen && !settingsBusy')
+            expect_transparent('Ctrl+, opens settings; Escape cancels invalid input')
+
             window.minimize()
             time.sleep(0.3)
             window.restore()
-            expect_transparent('restore with settings CSS still loaded')
+            expect_transparent('minimize and restore after applying settings')
             expect_mouse_target()
 
             # Keep the reader's own controls functional after settings CSS loads.
@@ -184,6 +230,11 @@ def main():
             if mode != '手动':
                 raise AssertionError(f'Reader mode control stopped working: {mode}')
             print('PASS reader controls after loading settings CSS', flush=True)
+            open_settings()
+            save_settings(400, 30, 95)
+            if (window.width, window.height) != (400, 30):
+                raise AssertionError('Single-line dimensions were clamped to the old minimum.')
+            expect_transparent('single-line size saved through built-in settings')
         except Exception:
             failures.append(traceback.format_exc())
         finally:
@@ -194,6 +245,7 @@ def main():
                 window.destroy()
 
     webview.start(run)
+    data_dir.cleanup()
     if failures:
         raise SystemExit('\n'.join(failures))
     print('All Windows transparency checks passed.')

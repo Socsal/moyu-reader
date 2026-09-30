@@ -1,18 +1,21 @@
 import webview
 import sys
-import os
 from pathlib import Path
 import json
 import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
+from settings import get_settings_html
 
 class BookReader:
-    def __init__(self):
+    def __init__(self, data_dir=None):
         self.content = ""
         self.current_file = None
-        self.progress_file = Path.home() / '.moyu_reader_progress.json'
-        self.config_file = Path.home() / '.moyu_reader_config.json'
+        data_dir = Path(data_dir) if data_dir is not None else Path.home()
+        self.progress_file = data_dir / '.moyu_reader_progress.json'
+        self.config_file = data_dir / '.moyu_reader_config.json'
+        self._window = None
+        self._reader_size = None
         self.progress = {}
         self.load_progress()
         self.load_config()
@@ -56,6 +59,37 @@ class BookReader:
         """获取阅读进度"""
         return self.progress.get(file_path, 0)
 
+    def get_config(self):
+        return self.config
+
+    def open_settings(self):
+        if self._reader_size is None:
+            self._reader_size = (self._window.width, self._window.height)
+        self._window.resize(550, 600)
+        return self.config
+
+    def close_settings(self):
+        if self._reader_size is not None:
+            self._window.resize(*self._reader_size)
+            self._reader_size = None
+
+    def apply_settings(self, width, height, speed):
+        try:
+            width, height, speed = int(width), int(height), int(speed)
+            if not (150 <= width <= 1200 and 20 <= height <= 600 and 10 <= speed <= 200):
+                raise ValueError('设置超出允许范围')
+        except (TypeError, ValueError, OverflowError):
+            return {'success': False, 'message': '宽度须为 150–1200，高度须为 20–600，速度须为 10–200。'}
+
+        config = {**self.config, 'window': {**self.config['window'], 'width': width, 'height': height}, 'speed': speed}
+        try:
+            self.config_file.write_text(json.dumps(config, indent=4, ensure_ascii=False), encoding='utf-8')
+        except OSError as error:
+            return {'success': False, 'message': f'保存失败：{error}'}
+        self.config = config
+        self._reader_size = (width, height)
+        return {'success': True, 'config': config}
+
     def load_txt(self, file_path):
         """加载TXT文件，自动检测编码"""
         try:
@@ -95,7 +129,7 @@ class BookReader:
     def open_file(self):
         """打开文件对话框"""
         file_types = ('TXT文件 (*.txt)', 'EPUB文件 (*.epub)', '所有文件 (*.*)')
-        result = window.create_file_dialog(webview.OPEN_DIALOG, file_types=file_types)
+        result = self._window.create_file_dialog(webview.FileDialog.OPEN, file_types=file_types)
 
         if result and len(result) > 0:
             file_path = result[0]
@@ -263,6 +297,7 @@ def get_html():
         <div id="controls">
             <div>
                 <button onclick="openFile()">打开</button>
+                <button id="settings-btn" onclick="openSettings()" title="Ctrl+,">设置</button>
                 <button id="mode-btn" onclick="toggleMode()" class="active">自动</button>
                 <button id="pause-btn" onclick="togglePause()">暂停</button>
                 <button onclick="closeApp()">关闭</button>
@@ -288,13 +323,15 @@ def get_html():
         let totalPages = 0;
         let pageHeight = 0;
         let currentFile = '';
+        let scrollFrame = 0;
 
         function startScroll() {
-            if (!content || isPaused) return;
-            requestAnimationFrame(scroll);
+            if (!content || isPaused || scrollFrame) return;
+            scrollFrame = requestAnimationFrame(scroll);
         }
 
         function scroll(timestamp) {
+            scrollFrame = 0;
             if (!lastTimestamp) lastTimestamp = timestamp;
             const delta = timestamp - lastTimestamp;
             lastTimestamp = timestamp;
@@ -314,7 +351,7 @@ def get_html():
                 }
 
                 saveProgress();
-                requestAnimationFrame(scroll);
+                scrollFrame = requestAnimationFrame(scroll);
             }
         }
 
@@ -351,6 +388,8 @@ def get_html():
             isPaused = !isPaused;
             const pauseBtn = document.getElementById('pause-btn');
             if (isPaused) {
+                cancelAnimationFrame(scrollFrame);
+                scrollFrame = 0;
                 pauseBtn.textContent = '继续';
             } else {
                 pauseBtn.textContent = '暂停';
@@ -382,8 +421,9 @@ def get_html():
         }
 
         function changeSpeed(value) {
-            scrollSpeed = value;
+            scrollSpeed = Number(value);
             document.getElementById('speed-value').textContent = value;
+            document.querySelector('#speed-control input').value = value;
         }
 
         function saveProgress() {
@@ -422,6 +462,18 @@ def get_html():
         }
 
         document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === ',') {
+                e.preventDefault();
+                openSettings();
+                return;
+            }
+            if (settingsOpen) {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeSettings();
+                }
+                return;
+            }
             if (e.key === 'Escape') {
                 closeApp();
             } else if (e.key === ' ') {
@@ -444,7 +496,7 @@ def get_html():
         });
 
         document.getElementById('text-display').addEventListener('wheel', (e) => {
-            if (!isAutoMode) {
+            if (!isAutoMode && !settingsOpen) {
                 e.preventDefault();
                 if (e.deltaY < 0) {
                     pageUp();
@@ -455,15 +507,16 @@ def get_html():
         });
 
         window.addEventListener('resize', () => {
-            if (!isAutoMode) {
+            if (!isAutoMode && !settingsOpen) {
                 updatePageInfo();
                 currentPage = Math.floor(currentPosition / pageHeight);
             }
         });
     </script>
+    <!-- SETTINGS -->
 </body>
 </html>
-    """
+    """.replace('<!-- SETTINGS -->', get_settings_html())
 
 
 def create_reader_window(api):
@@ -477,6 +530,7 @@ def create_reader_window(api):
         height=cfg['height'],
         x=cfg['x'],
         y=cfg['y'],
+        min_size=(150, 20),
         resizable=False,
         frameless=True,
         easy_drag=True,
@@ -485,6 +539,8 @@ def create_reader_window(api):
     )
     # before_show runs on the GUI thread after the native handle is available.
     window.events.before_show += enable_windows_transparency
+    api._window = window
+    window.events.shown += lambda: window.resize(cfg['width'], cfg['height'])
     api.close = lambda: window.destroy()
     return window
 
